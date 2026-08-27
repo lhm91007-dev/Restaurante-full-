@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Comanda — Panel de Restaurante</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<link rel="stylesheet" href="styles.css">
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-auth-compat.js"></script>
+<script src="firebase-config.js"></script>
+</head>
+<body>
+
+<!-- PANTALLA DE ACCESO (solo aparece en modo nube) -->
+<div class="auth-gate" id="authGate">
+  <div class="auth-box">
+    <div class="auth-mark">#01 · COMANDA</div>
+    <h1>Acceso del personal</h1>
+    <p class="sub">Inicia sesión con la cuenta que te dio el administrador</p>
+    <form id="loginForm">
+      <label class="field"><span>Correo</span><input type="email" id="loginEmail" required autocomplete="username"></label>
+      <label class="field"><span>Contraseña</span><input type="password" id="loginPassword" required autocomplete="current-password"></label>
+      <button type="submit" class="btn btn-fire">Ingresar</button>
+      <p class="auth-error" id="loginError"></p>
+    </form>
+  </div>
+</div>
+
+<div class="app" id="appRoot">
+
+  <!-- SIDEBAR -->
+  <aside class="rail">
+    <div class="rail-brand">
+      <span class="rail-brand-mark">#01</span>
+      <span class="rail-brand-name">COMANDA</span>
+    </div>
+    <nav class="rail-nav" id="nav">
+      <button class="rail-item is-active" data-view="dashboard"><span class="rail-num">01</span>Panel</button>
+      <button class="rail-item" data-view="pedidos"><span class="rail-num">02</span>Pedidos</button>
+      <button class="rail-item" data-view="menu"><span class="rail-num">03</span>Menú</button>
+      <button class="rail-item" data-view="entregas"><span class="rail-num">04</span>Entregas</button>
+      <button class="rail-item" data-view="pagos"><span class="rail-num">05</span>Pagos</button>
+      <button class="rail-item" data-view="inventario"><span class="rail-num">06</span>Inventario</button>
+      <button class="rail-item" data-view="repartidor"><span class="rail-num">07</span>Repartidor</button>
+    </nav>
+    <div class="rail-foot" id="syncBadge">
+      <span class="dot dot-live"></span> cargando…
+    </div>
+    <button class="rail-item" id="logoutBtn" style="display:none;">⎋ Cerrar sesión</button>
+  </aside>
+
+  <!-- MAIN -->
+  <main class="main">
+
+    <!-- DASHBOARD -->
+    <section class="view is-active" id="view-dashboard">
+      <header class="view-head">
+        <h1>Panel del día</h1>
+        <p class="sub">Resumen en vivo de tu operación</p>
+      </header>
+      <div class="stat-grid" id="statGrid"></div>
+      <div class="split">
+        <div class="panel">
+          <div class="panel-head"><h2>Últimos pedidos</h2></div>
+          <div id="recentOrders" class="ticket-stack"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><h2>Stock bajo</h2></div>
+          <div id="lowStockList" class="simple-list"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- PEDIDOS -->
+    <section class="view" id="view-pedidos">
+      <header class="view-head">
+        <h1>Pedidos</h1>
+        <p class="sub">Toma pedidos y sigue la cocina en tiempo real</p>
+      </header>
+
+      <div class="pedidos-layout">
+        <div class="panel new-order-panel">
+          <div class="panel-head"><h2>Nuevo pedido</h2></div>
+          <form id="orderForm">
+            <label class="field">
+              <span>Cliente</span>
+              <input type="text" id="ofCustomer" placeholder="Nombre del cliente" required>
+            </label>
+            <label class="field">
+              <span>Canal</span>
+              <select id="ofChannel">
+                <option value="Salón">Salón</option>
+                <option value="Para llevar">Para llevar</option>
+                <option value="Delivery propio">Delivery propio</option>
+                <option value="App externa">App externa (Uber/Rappi)</option>
+              </select>
+            </label>
+
+            <div class="field">
+              <span>Platos</span>
+              <div id="menuPicker" class="menu-picker"></div>
+            </div>
+
+            <div class="field">
+              <span>Pago</span>
+              <select id="ofPayment">
+                <option value="Efectivo">Efectivo</option>
+                <option value="Tarjeta">Tarjeta</option>
+                <option value="Billetera digital">Billetera digital</option>
+                <option value="Pago contra entrega">Pago contra entrega</option>
+              </select>
+            </div>
+
+            <div class="order-total-row">
+              <span>Total</span>
+              <strong id="ofTotal">$0.00</strong>
+            </div>
+
+            <button type="submit" class="btn btn-fire">Imprimir comanda →</button>
+          </form>
+        </div>
+
+        <div class="board">
+          <div class="board-col" data-status="Pendiente">
+            <div class="board-col-head"><span class="tag tag-amber">Pendiente</span><span class="count" id="cnt-Pendiente">0</span></div>
+            <div class="board-col-body" id="col-Pendiente"></div>
+          </div>
+          <div class="board-col" data-status="Preparando">
+            <div class="board-col-head"><span class="tag tag-fire">Preparando</span><span class="count" id="cnt-Preparando">0</span></div>
+            <div class="board-col-body" id="col-Preparando"></div>
+          </div>
+          <div class="board-col" data-status="En camino">
+            <div class="board-col-head"><span class="tag tag-steel">En camino</span><span class="count" id="cnt-En camino">0</span></div>
+            <div class="board-col-body" id="col-En camino"></div>
+          </div>
+          <div class="board-col" data-status="Entregado">
+            <div class="board-col-head"><span class="tag tag-herb">Entregado</span><span class="count" id="cnt-Entregado">0</span></div>
+            <div class="board-col-body" id="col-Entregado"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- MENU -->
+    <section class="view" id="view-menu">
+      <header class="view-head">
+        <h1>Menú</h1>
+        <p class="sub">Edita platos, precios y disponibilidad — se sincroniza al instante con Pedidos</p>
+      </header>
+      <div class="panel">
+        <div class="panel-head"><h2>Agregar plato</h2></div>
+        <form id="menuForm" class="menu-form">
+          <input type="text" id="mfName" placeholder="Nombre del plato" required>
+          <input type="text" id="mfCategory" placeholder="Categoría (ej. Entradas)" required>
+          <input type="number" id="mfPrice" placeholder="Precio" step="0.01" min="0" required>
+          <input type="text" id="mfDesc" placeholder="Descripción breve">
+          <button type="submit" class="btn btn-ink">Añadir al menú</button>
+        </form>
+      </div>
+      <div class="menu-grid" id="menuGrid"></div>
+    </section>
+
+    <!-- ENTREGAS -->
+    <section class="view" id="view-entregas">
+      <header class="view-head">
+        <h1>Entregas en tiempo real</h1>
+        <p class="sub">Seguimiento en vivo de repartidores y tiempos estimados</p>
+      </header>
+      <div class="entregas-layout">
+        <div id="map"></div>
+        <div class="panel">
+          <div class="panel-head"><h2>Rutas activas</h2></div>
+          <div id="activeDeliveries" class="delivery-list"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- PAGOS -->
+    <section class="view" id="view-pagos">
+      <header class="view-head">
+        <h1>Pagos</h1>
+        <p class="sub">Conciliación de cobros por método y por canal</p>
+      </header>
+      <div class="stat-grid" id="paymentStats"></div>
+      <div class="panel">
+        <div class="panel-head"><h2>Historial de transacciones</h2></div>
+        <table class="table" id="paymentsTable">
+          <thead><tr><th>Ticket</th><th>Cliente</th><th>Canal</th><th>Método</th><th>Total</th><th>Estado</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- INVENTARIO -->
+    <section class="view" id="view-inventario">
+      <header class="view-head">
+        <h1>Inventario</h1>
+        <p class="sub">Existencias en tiempo real y alertas de reabastecimiento</p>
+      </header>
+      <div class="panel">
+        <div class="panel-head"><h2>Agregar insumo</h2></div>
+        <form id="invForm" class="menu-form">
+          <input type="text" id="ivName" placeholder="Insumo (ej. Tomate)" required>
+          <input type="text" id="ivUnit" placeholder="Unidad (kg, u, L)" required>
+          <input type="number" id="ivStock" placeholder="Stock actual" step="0.1" required>
+          <input type="number" id="ivMin" placeholder="Mínimo requerido" step="0.1" required>
+          <button type="submit" class="btn btn-ink">Añadir insumo</button>
+        </form>
+      </div>
+      <div class="inv-grid" id="invGrid"></div>
+    </section>
+
+    <!-- REPARTIDOR (GPS real) -->
+    <section class="view" id="view-repartidor">
+      <header class="view-head">
+        <h1>Modo repartidor</h1>
+        <p class="sub">Abre esta pestaña desde el celular del repartidor para compartir su ubicación real</p>
+      </header>
+      <div class="panel" style="max-width:480px;">
+        <div class="panel-head"><h2>Compartir ubicación en vivo</h2></div>
+        <label class="field">
+          <span>Pedido que estoy entregando</span>
+          <select id="rdOrderSelect"></select>
+        </label>
+        <button class="btn btn-fire" id="rdToggle">Iniciar seguimiento GPS</button>
+        <p class="sub" id="rdStatus" style="margin-top:12px;">GPS detenido.</p>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
